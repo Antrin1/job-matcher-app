@@ -1,4 +1,4 @@
 streamlit
 spacy
 scikit-learn
-PyMuPDF
+pymupdf
