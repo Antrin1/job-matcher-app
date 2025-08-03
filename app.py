@@ -1,17 +1,22 @@
 import streamlit as st
 import re
 import fitz  # PyMuPDF
-import spacy.cli
-spacy.cli.download("en_core_web_sm")
 import spacy
-
-# Load the NLP model
-nlp = spacy.load("en_core_web_sm")
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-nlp = spacy.load("en_core_web_sm")
+# -------- Safe NLP Model Loading --------
+@st.cache_resource
+def load_nlp_model():
+    try:
+        return spacy.load("en_core_web_sm")
+    except OSError:
+        st.error("Model 'en_core_web_sm' not found. Please add the correct link in requirements.txt.")
+        return None
 
+nlp = load_nlp_model()
+
+# -------- UI Setup --------
 st.title("🤖 AI Job Description Matcher v2.0")
 st.markdown("Upload your resume and job description to get match score, quality tips, and smart skill suggestions.")
 
@@ -79,7 +84,7 @@ def suggest_skills(missing_words, jd_text):
     return list(set(suggestions))
 
 # -------- MAIN LOGIC --------
-if resume_file and jd_file:
+if resume_file and jd_file and nlp:
     resume_text = extract_text(resume_file)
     jd_text = extract_text(jd_file)
 
