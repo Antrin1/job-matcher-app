@@ -5,18 +5,18 @@ import spacy
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# -------- Safe NLP Model Loading --------
+# -------- SAFE NLP LOADING --------
 @st.cache_resource
-def load_nlp_model():
+def load_nlp():
     try:
         return spacy.load("en_core_web_sm")
     except OSError:
-        st.error("Model 'en_core_web_sm' not found. Please add the correct link in requirements.txt.")
+        st.error("❌ spaCy model 'en_core_web_sm' not found. Please check your requirements.txt.")
         return None
 
-nlp = load_nlp_model()
+nlp = load_nlp()
 
-# -------- UI Setup --------
+# -------- UI --------
 st.title("🤖 AI Job Description Matcher v2.0")
 st.markdown("Upload your resume and job description to get match score, quality tips, and smart skill suggestions.")
 
@@ -49,7 +49,7 @@ def extract_section(text, header):
     matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
     return matches[0].strip() if matches else ""
 
-# -------- RESUME QUALITY CHECK --------
+# -------- RESUME HEALTH CHECK --------
 def resume_health_check(text):
     sections = ["summary", "experience", "education", "skills", "projects"]
     results = []
