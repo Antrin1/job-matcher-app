@@ -1,7 +1,12 @@
 import streamlit as st
 import re
 import fitz  # PyMuPDF
+import spacy.cli
+spacy.cli.download("en_core_web_sm")
 import spacy
+
+# Load the NLP model
+nlp = spacy.load("en_core_web_sm")
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
