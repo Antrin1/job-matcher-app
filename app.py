@@ -1,57 +1,89 @@
-
 import streamlit as st
 import spacy
 import fitz  # PyMuPDF
-import os
-import base64
-import tempfile
+import docx2txt
 import requests
 from PIL import Image
-from docx import Document
-from io import BytesIO
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+import io
+import base64
+import re
 
 # Load spaCy model
 nlp = spacy.load("en_core_web_sm")
 
-# SERP API config
+# SerpAPI key
 SERP_API_KEY = "10c9f2331b5181c18c5dd1800db2b20a902ca7e4f27946a47f8a927c04efcca6"
 
+# Helper functions
 def extract_text_from_pdf(file):
-    doc = fitz.open(stream=file.read(), filetype="pdf")
     text = ""
-    image = None
-    for i, page in enumerate(doc):
+    doc = fitz.open(stream=file.read(), filetype="pdf")
+    for page in doc:
         text += page.get_text()
-        if image is None:
-            img_list = page.get_images(full=True)
-            if img_list:
-                xref = img_list[0][0]
-                base_image = doc.extract_image(xref)
-                image = Image.open(BytesIO(base_image["image"]))
-    return text, image
+    return text
 
 def extract_text_from_docx(file):
-    doc = Document(file)
-    return " ".join([para.text for para in doc.paragraphs])
+    return docx2txt.process(file)
+
+def extract_text(file):
+    if file.name.endswith(".pdf"):
+        return extract_text_from_pdf(file)
+    elif file.name.endswith(".docx"):
+        return extract_text_from_docx(file)
+    else:
+        return ""
+
+def extract_image_from_pdf(file):
+    doc = fitz.open(stream=file.read(), filetype="pdf")
+    for page_index in range(len(doc)):
+        images = doc.get_page_images(page_index)
+        for img_index, img in enumerate(images):
+            xref = img[0]
+            base_image = doc.extract_image(xref)
+            image_bytes = base_image["image"]
+            image = Image.open(io.BytesIO(image_bytes))
+            return image
+    return None
+
+def extract_resume_details(text):
+    name_match = re.search(r"Name[:\-]?\s*([A-Z][a-z]+(?:\s[A-Z][a-z]+)*)", text)
+    role_match = re.search(r"(Applying for|Role|Position)[:\-]?\s*([^\n]+)", text, re.IGNORECASE)
+    exp_match = re.search(r"(\d+)\+?\s+(years|yrs)", text, re.IGNORECASE)
+    return {
+        "name": name_match.group(1) if name_match else "N/A",
+        "role": role_match.group(2) if role_match else "N/A",
+        "experience": exp_match.group(1) + " years" if exp_match else "N/A"
+    }
 
 def get_keywords(text):
     doc = nlp(text.lower())
-    return list(set([token.lemma_ for token in doc if token.pos_ in ["NOUN", "PROPN", "VERB", "ADJ"] and not token.is_stop]))
+    return list(set([token.lemma_ for token in doc if token.pos_ in ['NOUN', 'VERB', 'PROPN'] and not token.is_stop]))
 
-def similarity_score(text1, text2):
-    vectorizer = TfidfVectorizer()
-    vectors = vectorizer.fit_transform([text1, text2])
-    return round(cosine_similarity(vectors[0], vectors[1])[0][0] * 100, 2)
+def calculate_match(resume_text, jd_text):
+    resume_keywords = get_keywords(resume_text)
+    jd_keywords = get_keywords(jd_text)
+    matched_keywords = set(resume_keywords) & set(jd_keywords)
+    score = (len(matched_keywords) / len(jd_keywords)) * 100 if jd_keywords else 0
+    return round(score, 2), matched_keywords
 
-def get_related_jobs(query):
+def get_resume_insights(text):
+    insights = []
+    if "objective" not in text.lower() and "summary" not in text.lower():
+        insights.append("💡 Consider adding an Objective/Summary section.")
+    if "certification" not in text.lower():
+        insights.append("💡 Consider including relevant certifications.")
+    if "project" not in text.lower():
+        insights.append("💡 Adding project experience can strengthen your resume.")
+    if "achievement" not in text.lower():
+        insights.append("💡 Highlight notable achievements to stand out.")
+    return insights
+
+def get_similar_jobs(query):
     url = "https://serpapi.com/search.json"
     params = {
-        "q": f"{query} jobs",
-        "location": "India",
-        "api_key": SERP_API_KEY,
-        "engine": "google_jobs"
+        "engine": "google_jobs",
+        "q": query,
+        "api_key": SERP_API_KEY
     }
     response = requests.get(url, params=params)
     jobs = []
@@ -61,69 +93,68 @@ def get_related_jobs(query):
             jobs.append({
                 "title": job.get("title"),
                 "company": job.get("company_name"),
-                "link": job.get("via")
+                "location": job.get("location"),
+                "link": job.get("related_links", [{}])[0].get("link", "#")
             })
     return jobs
 
-st.set_page_config(page_title="AI Resume Matcher", layout="wide")
+# Streamlit UI
+st.title("💼 Resume vs Job Description Matcher")
 
-st.title("🤖 AI Resume & JD Matcher - Enhanced Edition")
+st.markdown("---")
 
-col1, col2 = st.columns(2)
-with col1:
-    resume_file = st.file_uploader("Upload Resume (PDF/DOCX)", type=["pdf", "docx"])
-with col2:
-    jd_file = st.file_uploader("Upload Job Description (PDF/DOCX)", type=["pdf", "docx"])
+resume_file = st.file_uploader("📤 Upload your Resume (PDF or DOCX)", type=["pdf", "docx"])
+jd_file = st.file_uploader("📥 Upload the Job Description (PDF or DOCX)", type=["pdf", "docx"])
 
-if resume_file and jd_file:
-    # Resume parsing
-    if resume_file.type == "application/pdf":
-        resume_text, resume_img = extract_text_from_pdf(resume_file)
-    else:
-        resume_text = extract_text_from_docx(resume_file)
-        resume_img = None
+resume_text, jd_text = "", ""
+resume_data = {}
 
-    # JD parsing
-    if jd_file.type == "application/pdf":
-        jd_text, _ = extract_text_from_pdf(jd_file)
-    else:
-        jd_text = extract_text_from_docx(jd_file)
+if resume_file:
+    resume_text = extract_text(resume_file)
+    resume_file.seek(0)
+    resume_image = extract_image_from_pdf(resume_file) if resume_file.name.endswith(".pdf") else None
+    resume_data = extract_resume_details(resume_text)
 
-    st.markdown("---")
-    col1, col2 = st.columns([1, 4])
-    with col1:
-        if resume_img:
-            st.image(resume_img, caption="Profile Photo", use_container_width=True)
-    with col2:
-        st.subheader("Resume Overview")
-        name = nlp(resume_text).ents[0].text if nlp(resume_text).ents else "Not Detected"
-        st.markdown(f"**Name:** {name}")
-        st.markdown("**Experience:** Extracting...")
-        st.markdown("**Role Applied:** Extracting...")
+    st.markdown("### 🧾 Resume Overview")
+    cols = st.columns([1, 2])
+    with cols[0]:
+        if resume_image:
+            st.image(resume_image, use_column_width=True)
+    with cols[1]:
+        st.write("**Name:**", resume_data["name"])
+        st.write("**Experience:**", resume_data["experience"])
+        st.write("**Role Applied:**", resume_data["role"])
+
+if resume_text and jd_file:
+    jd_text = extract_text(jd_file)
 
     st.markdown("---")
-    st.subheader("🔍 Match Analysis")
-    score = similarity_score(resume_text, jd_text)
+    st.markdown("## 🔍 Match Analysis")
+
+    score, matched_keywords = calculate_match(resume_text, jd_text)
     st.metric("Match Score", f"{score}%")
+    st.write("**Matched Keywords:**", ", ".join(matched_keywords))
 
-    res_keywords = get_keywords(resume_text)
-    jd_keywords = get_keywords(jd_text)
-    common = list(set(res_keywords) & set(jd_keywords))
-    st.markdown(f"**Matched Keywords:** {', '.join(common[:15])}")
+    st.markdown("## 💡 Resume Insights")
+    insights = get_resume_insights(resume_text)
+    for insight in insights:
+        st.info(insight)
 
-    st.subheader("💡 Resume Insights")
-    tips = []
-    if len(resume_text) < 500:
-        tips.append("Resume is too short; consider elaborating your responsibilities and achievements.")
-    if "objective" not in resume_text.lower():
-        tips.append("Consider adding an Objective/Summary section.")
-    if "project" not in resume_text.lower():
-        tips.append("Highlight at least one major project.")
+    st.markdown("## 🌐 Similar Jobs You Might Like")
+    query = resume_data["role"] if resume_data["role"] != "N/A" else "AI Developer"
+    jobs = get_similar_jobs(query)
+    if jobs:
+        for job in jobs:
+            st.markdown(f"- [{job['title']} at {job['company']}, {job['location']}]({job['link']})")
+    else:
+        st.write("No related jobs found.")
 
-    for tip in tips:
-        st.info(f"💡 {tip}")
+    st.markdown("## 📝 Resume Summary & Fit")
 
-    st.subheader("🌐 Similar Jobs You Might Like")
-    related_jobs = get_related_jobs(name)
-    for job in related_jobs:
-        st.markdown(f"- **{job['title']}** at *{job['company']}* via [{job['link']}]({job['link']})")
+    strengths = "Your resume shows strength in technical skills and experience in project work."
+    fit = "This job aligns well with your role interests, especially if you enhance your resume with certifications or achievements."
+    demerits = "Some sections like an objective or projects are missing which could affect ATS ranking."
+
+    st.success(f"**Strengths:** {strengths}")
+    st.warning(f"**Fit Summary:** {fit}")
+    st.error(f"**Areas to Improve:** {demerits}")
