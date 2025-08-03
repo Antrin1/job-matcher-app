@@ -1,7 +1,7 @@
 import streamlit as st
 import re
 import fitz  # PyMuPDF
-import en_core_web_sm  # ✅ Direct model import
+import spacy
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -9,20 +9,10 @@ from sklearn.metrics.pairwise import cosine_similarity
 @st.cache_resource
 def load_nlp():
     try:
-        return en_core_web_sm.load()  # ✅ Use model as a module
-    except Exception as e:
-        st.error("❌ spaCy model could not be loaded.")
-        st.text(str(e))
+        return spacy.load("en_core_web_sm")
+    except OSError:
+        st.error("❌ spaCy model 'en_core_web_sm' not found. Please check your requirements.txt.")
         return None
-
-nlp = load_nlp()
-
-# -------- UI --------
-st.title("🤖 AI Job Description Matcher v2.0")
-st.markdown("Upload your resume and job description to get match score, quality tips, and smart skill suggestions.")
-
-resume_file = st.file_uploader("📄 Upload Resume (.pdf or .txt)", type=["pdf", "txt"])
-jd_file = st.file_uploader("📑 Upload Job Description (.pdf or .txt)", type=["pdf", "txt"])
 
 # -------- FILE READ & CLEAN --------
 def extract_text(uploaded_file):
@@ -50,7 +40,7 @@ def extract_section(text, header):
     matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
     return matches[0].strip() if matches else ""
 
-# -------- RESUME QUALITY CHECK --------
+# -------- RESUME HEALTH CHECK --------
 def resume_health_check(text):
     sections = ["summary", "experience", "education", "skills", "projects"]
     results = []
@@ -75,7 +65,7 @@ def resume_health_check(text):
     return results
 
 # -------- SKILL SUGGESTIONS --------
-def suggest_skills(missing_words, jd_text):
+def suggest_skills(missing_words, jd_text, nlp):
     suggestions = []
     for word in missing_words:
         token = nlp(word)
@@ -84,44 +74,58 @@ def suggest_skills(missing_words, jd_text):
                 suggestions.append(f"💡 Consider adding: '{token.text}' → Related to '{token2.text}'")
     return list(set(suggestions))
 
-# -------- MAIN LOGIC --------
-if resume_file and jd_file and nlp:
-    resume_text = extract_text(resume_file)
-    jd_text = extract_text(jd_file)
+# -------- MAIN --------
+def main():
+    st.title("🤖 AI Job Description Matcher v2.0")
+    st.markdown("Upload your resume and job description to get match score, quality tips, and smart skill suggestions.")
 
-    cleaned_resume = clean_text(resume_text)
-    cleaned_jd = clean_text(jd_text)
+    resume_file = st.file_uploader("📄 Upload Resume (.pdf or .txt)", type=["pdf", "txt"])
+    jd_file = st.file_uploader("📑 Upload Job Description (.pdf or .txt)", type=["pdf", "txt"])
 
-    # Overall Match
-    match_score, tfidf_vec = get_cosine_similarity(cleaned_resume, cleaned_jd)
-    st.subheader("🎯 Overall Match Score")
-    st.progress(int(match_score))
-    st.write(f"Your resume matches **{match_score:.2f}%** of the job description.")
+    nlp = load_nlp()
+    if not nlp:
+        return
 
-    # Section-wise scores
-    st.subheader("📊 Section-wise Matching")
-    for section in ["summary", "skills", "experience"]:
-        resume_section = extract_section(resume_text, section)
-        jd_section = extract_section(jd_text, "responsibilities" if section != "skills" else "requirements")
-        if resume_section and jd_section:
-            sec_score, _ = get_cosine_similarity(clean_text(resume_section), clean_text(jd_section))
-            st.write(f"**{section.capitalize()}** match: {sec_score:.2f}%")
-            st.progress(int(sec_score))
+    if resume_file and jd_file:
+        resume_text = extract_text(resume_file)
+        jd_text = extract_text(jd_file)
 
-    # Resume health
-    st.subheader("🩺 Resume Health Check")
-    for tip in resume_health_check(resume_text):
-        st.write(tip)
+        cleaned_resume = clean_text(resume_text)
+        cleaned_jd = clean_text(jd_text)
 
-    # Smart suggestions
-    st.subheader("🧠 Smart Skill Suggestions")
-    jd_words = set(tfidf_vec.get_feature_names_out()[1:])
-    resume_words = set(cleaned_resume.split())
-    missing = jd_words - resume_words
+        # Overall Match
+        match_score, tfidf_vec = get_cosine_similarity(cleaned_resume, cleaned_jd)
+        st.subheader("🎯 Overall Match Score")
+        st.progress(int(match_score))
+        st.write(f"Your resume matches **{match_score:.2f}%** of the job description.")
 
-    suggestions = suggest_skills(list(missing)[:20], jd_text)
-    if suggestions:
-        for s in suggestions[:10]:
-            st.write(s)
-    else:
-        st.success("✅ All relevant keywords are already present in your resume!")
+        # Section-wise scores
+        st.subheader("📊 Section-wise Matching")
+        for section in ["summary", "skills", "experience"]:
+            resume_section = extract_section(resume_text, section)
+            jd_section = extract_section(jd_text, "responsibilities" if section != "skills" else "requirements")
+            if resume_section and jd_section:
+                sec_score, _ = get_cosine_similarity(clean_text(resume_section), clean_text(jd_section))
+                st.write(f"**{section.capitalize()}** match: {sec_score:.2f}%")
+                st.progress(int(sec_score))
+
+        # Resume health
+        st.subheader("🩺 Resume Health Check")
+        for tip in resume_health_check(resume_text):
+            st.write(tip)
+
+        # Smart suggestions
+        st.subheader("🧠 Smart Skill Suggestions")
+        jd_words = set(tfidf_vec.get_feature_names_out()[1:])
+        resume_words = set(cleaned_resume.split())
+        missing = jd_words - resume_words
+
+        suggestions = suggest_skills(list(missing)[:20], jd_text, nlp)
+        if suggestions:
+            for s in suggestions[:10]:
+                st.write(s)
+        else:
+            st.success("✅ All relevant keywords are already present in your resume!")
+
+if __name__ == "__main__":
+    main()
