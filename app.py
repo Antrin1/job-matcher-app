@@ -6,7 +6,7 @@ import requests
 from io import BytesIO
 from PIL import Image
 import base64
-from serpapi import GoogleSearch
+from serpapi.google_search_results import GoogleSearch
 from openai import OpenAI
 
 # Load NLP model
