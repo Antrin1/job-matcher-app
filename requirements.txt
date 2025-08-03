@@ -1,11 +1,11 @@
-
 streamlit
 spacy
 scikit-learn
 PyMuPDF
+docx2txt
 requests
 pillow
-docx2txt
-PyPDF2
 openai>=1.0.0
+python-dotenv
+serpapi
 https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
