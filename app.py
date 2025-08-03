@@ -8,19 +8,35 @@ from sklearn.metrics.pairwise import cosine_similarity
 # -------- SAFE NLP LOADING --------
 @st.cache_resource
 def load_nlp():
+    import subprocess
+    import sys
     try:
         return spacy.load("en_core_web_sm")
     except OSError:
-        st.error("❌ spaCy model 'en_core_web_sm' not found. Please check your requirements.txt.")
-        return None
+        with st.spinner("Downloading spaCy model..."):
+            subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
+        return spacy.load("en_core_web_sm")
+
+nlp = load_nlp()
+
+# -------- UI --------
+st.set_page_config(page_title="AI Job Matcher", layout="centered")
+st.title("🤖 AI Job Description Matcher v2.0")
+st.markdown("Upload your resume and job description to get match score, quality tips, and smart skill suggestions.")
+
+resume_file = st.file_uploader("📄 Upload Resume (.pdf or .txt)", type=["pdf", "txt"])
+jd_file = st.file_uploader("📑 Upload Job Description (.pdf or .txt)", type=["pdf", "txt"])
 
 # -------- FILE READ & CLEAN --------
 def extract_text(uploaded_file):
-    if uploaded_file.name.endswith(".pdf"):
-        pdf = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-        return "\n".join([page.get_text() for page in pdf])
-    elif uploaded_file.name.endswith(".txt"):
-        return uploaded_file.read().decode("utf-8")
+    try:
+        if uploaded_file.name.endswith(".pdf"):
+            pdf = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+            return "\n".join([page.get_text() for page in pdf])
+        elif uploaded_file.name.endswith(".txt"):
+            return uploaded_file.read().decode("utf-8")
+    except Exception as e:
+        st.error(f"❌ Error reading file: {e}")
     return ""
 
 def clean_text(text):
@@ -65,7 +81,7 @@ def resume_health_check(text):
     return results
 
 # -------- SKILL SUGGESTIONS --------
-def suggest_skills(missing_words, jd_text, nlp):
+def suggest_skills(missing_words, jd_text):
     suggestions = []
     for word in missing_words:
         token = nlp(word)
@@ -74,58 +90,44 @@ def suggest_skills(missing_words, jd_text, nlp):
                 suggestions.append(f"💡 Consider adding: '{token.text}' → Related to '{token2.text}'")
     return list(set(suggestions))
 
-# -------- MAIN --------
-def main():
-    st.title("🤖 AI Job Description Matcher v2.0")
-    st.markdown("Upload your resume and job description to get match score, quality tips, and smart skill suggestions.")
+# -------- MAIN LOGIC --------
+if resume_file and jd_file and nlp:
+    resume_text = extract_text(resume_file)
+    jd_text = extract_text(jd_file)
 
-    resume_file = st.file_uploader("📄 Upload Resume (.pdf or .txt)", type=["pdf", "txt"])
-    jd_file = st.file_uploader("📑 Upload Job Description (.pdf or .txt)", type=["pdf", "txt"])
+    cleaned_resume = clean_text(resume_text)
+    cleaned_jd = clean_text(jd_text)
 
-    nlp = load_nlp()
-    if not nlp:
-        return
+    # Overall Match
+    match_score, tfidf_vec = get_cosine_similarity(cleaned_resume, cleaned_jd)
+    st.subheader("🎯 Overall Match Score")
+    st.progress(int(match_score))
+    st.write(f"Your resume matches **{match_score:.2f}%** of the job description.")
 
-    if resume_file and jd_file:
-        resume_text = extract_text(resume_file)
-        jd_text = extract_text(jd_file)
+    # Section-wise scores
+    st.subheader("📊 Section-wise Matching")
+    for section in ["summary", "skills", "experience"]:
+        resume_section = extract_section(resume_text, section)
+        jd_section = extract_section(jd_text, "responsibilities" if section != "skills" else "requirements")
+        if resume_section and jd_section:
+            sec_score, _ = get_cosine_similarity(clean_text(resume_section), clean_text(jd_section))
+            st.write(f"**{section.capitalize()}** match: {sec_score:.2f}%")
+            st.progress(int(sec_score))
 
-        cleaned_resume = clean_text(resume_text)
-        cleaned_jd = clean_text(jd_text)
+    # Resume health
+    st.subheader("🩺 Resume Health Check")
+    for tip in resume_health_check(resume_text):
+        st.write(tip)
 
-        # Overall Match
-        match_score, tfidf_vec = get_cosine_similarity(cleaned_resume, cleaned_jd)
-        st.subheader("🎯 Overall Match Score")
-        st.progress(int(match_score))
-        st.write(f"Your resume matches **{match_score:.2f}%** of the job description.")
+    # Smart suggestions
+    st.subheader("🧠 Smart Skill Suggestions")
+    jd_words = set(tfidf_vec.get_feature_names_out()[1:])
+    resume_words = set(cleaned_resume.split())
+    missing = jd_words - resume_words
 
-        # Section-wise scores
-        st.subheader("📊 Section-wise Matching")
-        for section in ["summary", "skills", "experience"]:
-            resume_section = extract_section(resume_text, section)
-            jd_section = extract_section(jd_text, "responsibilities" if section != "skills" else "requirements")
-            if resume_section and jd_section:
-                sec_score, _ = get_cosine_similarity(clean_text(resume_section), clean_text(jd_section))
-                st.write(f"**{section.capitalize()}** match: {sec_score:.2f}%")
-                st.progress(int(sec_score))
-
-        # Resume health
-        st.subheader("🩺 Resume Health Check")
-        for tip in resume_health_check(resume_text):
-            st.write(tip)
-
-        # Smart suggestions
-        st.subheader("🧠 Smart Skill Suggestions")
-        jd_words = set(tfidf_vec.get_feature_names_out()[1:])
-        resume_words = set(cleaned_resume.split())
-        missing = jd_words - resume_words
-
-        suggestions = suggest_skills(list(missing)[:20], jd_text, nlp)
-        if suggestions:
-            for s in suggestions[:10]:
-                st.write(s)
-        else:
-            st.success("✅ All relevant keywords are already present in your resume!")
-
-if __name__ == "__main__":
-    main()
+    suggestions = suggest_skills(list(missing)[:20], jd_text)
+    if suggestions:
+        for s in suggestions[:10]:
+            st.write(s)
+    else:
+        st.success("✅ All relevant keywords are already present in your resume!")
