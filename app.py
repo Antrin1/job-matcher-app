@@ -5,22 +5,8 @@ import spacy
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# -------- SAFE NLP LOADING --------
-@st.cache_resource
-def load_nlp():
-    import subprocess
-    import sys
-    try:
-        return spacy.load("en_core_web_sm")
-    except OSError:
-        with st.spinner("Downloading spaCy model..."):
-            subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
-        return spacy.load("en_core_web_sm")
+nlp = spacy.load("en_core_web_sm")
 
-nlp = load_nlp()
-
-# -------- UI --------
-st.set_page_config(page_title="AI Job Matcher", layout="centered")
 st.title("🤖 AI Job Description Matcher v2.0")
 st.markdown("Upload your resume and job description to get match score, quality tips, and smart skill suggestions.")
 
@@ -29,14 +15,11 @@ jd_file = st.file_uploader("📑 Upload Job Description (.pdf or .txt)", type=["
 
 # -------- FILE READ & CLEAN --------
 def extract_text(uploaded_file):
-    try:
-        if uploaded_file.name.endswith(".pdf"):
-            pdf = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-            return "\n".join([page.get_text() for page in pdf])
-        elif uploaded_file.name.endswith(".txt"):
-            return uploaded_file.read().decode("utf-8")
-    except Exception as e:
-        st.error(f"❌ Error reading file: {e}")
+    if uploaded_file.name.endswith(".pdf"):
+        pdf = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+        return "\n".join([page.get_text() for page in pdf])
+    elif uploaded_file.name.endswith(".txt"):
+        return uploaded_file.read().decode("utf-8")
     return ""
 
 def clean_text(text):
@@ -56,7 +39,7 @@ def extract_section(text, header):
     matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
     return matches[0].strip() if matches else ""
 
-# -------- RESUME HEALTH CHECK --------
+# -------- RESUME QUALITY CHECK --------
 def resume_health_check(text):
     sections = ["summary", "experience", "education", "skills", "projects"]
     results = []
@@ -91,7 +74,7 @@ def suggest_skills(missing_words, jd_text):
     return list(set(suggestions))
 
 # -------- MAIN LOGIC --------
-if resume_file and jd_file and nlp:
+if resume_file and jd_file:
     resume_text = extract_text(resume_file)
     jd_text = extract_text(jd_file)
 
