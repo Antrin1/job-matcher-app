@@ -114,14 +114,25 @@ jd_file = st.file_uploader("📑 Upload Job Description (.pdf or .txt)", type=["
 resume_text = ""
 jd_text = ""
 
+# if resume_file:
+#     resume_bytes = resume_file.read()
+#     resume_text = extract_resume_text(BytesIO(resume_bytes))
+#     name = extract_name(resume_text)
+#     role = extract_field(resume_text, ["role", "job", "applying for"])
+#     experience = extract_section(resume_text, "experience")
+#     education = extract_section(resume_text, "education")
+#     image = extract_image_from_pdf(BytesIO(resume_bytes)) if resume_file.name.endswith(".pdf") else None
+
 if resume_file:
     resume_bytes = resume_file.read()
-    resume_text = extract_resume_text(BytesIO(resume_bytes))
+    resume_file.seek(0)
+    resume_text = extract_resume_text(resume_file)
     name = extract_name(resume_text)
     role = extract_field(resume_text, ["role", "job", "applying for"])
     experience = extract_section(resume_text, "experience")
     education = extract_section(resume_text, "education")
     image = extract_image_from_pdf(BytesIO(resume_bytes)) if resume_file.name.endswith(".pdf") else None
+
 
     st.subheader("👤 Resume Preview")
     if image:
