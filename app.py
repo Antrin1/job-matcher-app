@@ -1,7 +1,7 @@
 import streamlit as st
 import re
 import fitz  # PyMuPDF
-import spacy
+import en_core_web_sm  # ✅ Direct model import
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -9,9 +9,10 @@ from sklearn.metrics.pairwise import cosine_similarity
 @st.cache_resource
 def load_nlp():
     try:
-        return spacy.load("en_core_web_sm")
-    except OSError:
-        st.error("❌ spaCy model 'en_core_web_sm' not found. Please check your requirements.txt.")
+        return en_core_web_sm.load()  # ✅ Use model as a module
+    except Exception as e:
+        st.error("❌ spaCy model could not be loaded.")
+        st.text(str(e))
         return None
 
 nlp = load_nlp()
@@ -49,7 +50,7 @@ def extract_section(text, header):
     matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
     return matches[0].strip() if matches else ""
 
-# -------- RESUME HEALTH CHECK --------
+# -------- RESUME QUALITY CHECK --------
 def resume_health_check(text):
     sections = ["summary", "experience", "education", "skills", "projects"]
     results = []
